@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   DndContext,
   DragEndEvent,
@@ -7,12 +7,13 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { TravelPlan } from '../types';
+import { TravelPlan, UserRole } from '../types';
 import { TabItem } from '../types/ui';
 import {
   TravelPlanService,
   WeatherService,
   ScheduleService,
+  ShareService,
 } from '../services';
 import { Button, Tabs } from '../components/ui';
 import { useAlert } from '../hooks/useAlert';
@@ -27,28 +28,52 @@ import ReviewTab from '../components/review/ReviewTab';
 const PlanDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const alert = useAlert();
   const [plan, setPlan] = useState<TravelPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('preparation');
   const [showShareModal, setShowShareModal] = useState(false);
+  const [sharedRole, setSharedRole] = useState<UserRole | null>(null);
 
   const travelPlanService = new TravelPlanService();
   const scheduleService = new ScheduleService();
+  const shareService = new ShareService();
 
   const sensors = useSensors(useSensor(PointerSensor));
 
   const loadPlan = useCallback(async (planId: string) => {
     try {
       setLoading(true);
+
+      // 공유 링크 파라미터 확인
+      const shareParams = shareService.parseShareParams(searchParams);
+
       const planData = await travelPlanService.getTravelPlan(planId);
       if (!planData) {
         setError('여행 계획을 찾을 수 없습니다.');
         return;
       }
 
-      // 권한 체크 - 멤버인지 확인
+      // 공유 링크로 접근한 경우
+      if (shareParams?.shareId) {
+        // 확정된 계획만 공유 가능
+        if (!planData.confirmed) {
+          setError('이 여행 계획은 아직 확정되지 않았습니다.');
+          return;
+        }
+
+        // 공유 role 설정
+        setSharedRole(shareParams.role || UserRole.VIEWER);
+        setPlan(planData);
+
+        // 공유 링크로 접근했다는 알림
+        alert.success(`${shareParams.role === UserRole.COLLABORATOR ? '공동 작성자' : '뷰어'}로 참여했습니다!`);
+        return;
+      }
+
+      // 일반 접근: 권한 체크 - 멤버인지 확인
       const currentUserId = travelPlanService.getCurrentUserId();
       const isMember = planData.members.some(
         (member) => member.id === currentUserId
@@ -67,7 +92,7 @@ const PlanDetail: React.FC = () => {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     if (id) {
@@ -120,12 +145,17 @@ const PlanDetail: React.FC = () => {
 
   const getCurrentUserRole = () => {
     if (!plan) return null;
+
+    // 공유 링크로 접근한 경우 공유 role 반환
+    if (sharedRole) return sharedRole;
+
+    // 일반 접근: 멤버의 role 반환
     const currentUserId = travelPlanService.getCurrentUserId();
     const member = plan.members.find((m) => m.id === currentUserId);
     return member?.role || null;
   };
 
-  const isOwner = getCurrentUserRole() === 'owner';
+  const isOwner = getCurrentUserRole() === UserRole.OWNER;
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -352,8 +382,21 @@ const PlanDetail: React.FC = () => {
               )}
             </div>
 
+            {/* 공유 링크 접근 표시 */}
+            {sharedRole && (
+              <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-800">
+                  🔗 공유 링크로 참여 중입니다 (
+                  {sharedRole === UserRole.COLLABORATOR
+                    ? '공동 작성자'
+                    : '뷰어'}
+                  )
+                </p>
+              </div>
+            )}
+
             {/* 액션 버튼 (Owner만) */}
-            {isOwner && (
+            {isOwner && !sharedRole && (
               <div className="mt-6 flex space-x-3">
                 {plan.confirmed ? (
                   <Button variant="secondary" onClick={handleUnconfirmPlan}>
