@@ -96,7 +96,7 @@ export class PlaceService {
         addedAt: new Date().toISOString(),
       };
 
-      await this.db.create('temporaryPlaces', temporaryPlace);
+      await this.db.create('temporary_places', temporaryPlace);
       return temporaryPlace;
     } catch (error) {
       console.error('Failed to add to temporary storage:', error);
@@ -107,7 +107,7 @@ export class PlaceService {
   async getTemporaryPlaces(planId: string): Promise<TemporaryPlace[]> {
     try {
       const allTemporary =
-        await this.db.getAll<TemporaryPlace>('temporaryPlaces');
+        await this.db.getAll<TemporaryPlace>('temporary_places');
       return allTemporary.filter((temp) => temp.planId === planId);
     } catch (error) {
       console.error('Failed to get temporary places:', error);
@@ -117,7 +117,7 @@ export class PlaceService {
 
   async removeFromTemporaryStorage(id: string): Promise<void> {
     try {
-      await this.db.delete('temporaryPlaces', id);
+      await this.db.delete('temporary_places', id);
     } catch (error) {
       console.error('Failed to remove from temporary storage:', error);
       throw error;

@@ -1,4 +1,6 @@
-import { TravelPlan, UserRole } from '../types';
+import { supabase } from '../lib/supabase';
+import { TravelPlan, UserRole, Member, User } from '../types';
+import { db } from './database';
 
 export interface ShareLink {
   id: string;
@@ -33,6 +35,165 @@ export class ShareService {
     };
 
     return shareLink;
+  }
+
+  /**
+   * 공유 링크를 통해 여행 계획에 참여
+   */
+  public async joinPlanFromShareLink(
+    planId: string,
+    user: User,
+    role: UserRole = UserRole.VIEWER
+  ): Promise<TravelPlan> {
+    // 여행 계획 가져오기
+    const plan = await db.read<TravelPlan>('travel_plans', planId);
+
+    if (!plan) {
+      throw new Error('여행 계획을 찾을 수 없습니다.');
+    }
+
+    // 이미 멤버인지 확인
+    const isAlreadyMember =
+      plan.ownerId === user.id ||
+      plan.members.some((m) => m.id === user.id);
+
+    if (isAlreadyMember) {
+      return plan;
+    }
+
+    // 새 멤버 추가
+    const newMember: Member = {
+      id: user.id,
+      name: user.name,
+      role,
+    };
+
+    const updatedPlan: TravelPlan = {
+      ...plan,
+      members: [...plan.members, newMember],
+    };
+
+    // DB 업데이트
+    return db.update('travel_plans', updatedPlan);
+  }
+
+  /**
+   * 멤버 추가
+   */
+  public async addMember(
+    planId: string,
+    userId: string,
+    userName: string,
+    role: UserRole = UserRole.VIEWER
+  ): Promise<TravelPlan> {
+    const plan = await db.read<TravelPlan>('travel_plans', planId);
+
+    if (!plan) {
+      throw new Error('여행 계획을 찾을 수 없습니다.');
+    }
+
+    // 이미 멤버인지 확인
+    const existingMember = plan.members.find((m) => m.id === userId);
+    if (existingMember) {
+      throw new Error('이미 멤버로 등록되어 있습니다.');
+    }
+
+    const newMember: Member = {
+      id: userId,
+      name: userName,
+      role,
+    };
+
+    const updatedPlan: TravelPlan = {
+      ...plan,
+      members: [...plan.members, newMember],
+    };
+
+    return db.update('travel_plans', updatedPlan);
+  }
+
+  /**
+   * 멤버 제거
+   */
+  public async removeMember(
+    planId: string,
+    userId: string
+  ): Promise<TravelPlan> {
+    const plan = await db.read<TravelPlan>('travel_plans', planId);
+
+    if (!plan) {
+      throw new Error('여행 계획을 찾을 수 없습니다.');
+    }
+
+    // 소유자는 제거할 수 없음
+    if (plan.ownerId === userId) {
+      throw new Error('소유자는 제거할 수 없습니다.');
+    }
+
+    const updatedPlan: TravelPlan = {
+      ...plan,
+      members: plan.members.filter((m) => m.id !== userId),
+    };
+
+    return db.update('travel_plans', updatedPlan);
+  }
+
+  /**
+   * 멤버 역할 변경
+   */
+  public async updateMemberRole(
+    planId: string,
+    userId: string,
+    newRole: UserRole
+  ): Promise<TravelPlan> {
+    const plan = await db.read<TravelPlan>('travel_plans', planId);
+
+    if (!plan) {
+      throw new Error('여행 계획을 찾을 수 없습니다.');
+    }
+
+    // 소유자 역할은 변경할 수 없음
+    if (plan.ownerId === userId) {
+      throw new Error('소유자의 역할은 변경할 수 없습니다.');
+    }
+
+    const updatedMembers = plan.members.map((m) =>
+      m.id === userId ? { ...m, role: newRole } : m
+    );
+
+    const updatedPlan: TravelPlan = {
+      ...plan,
+      members: updatedMembers,
+    };
+
+    return db.update('travel_plans', updatedPlan);
+  }
+
+  /**
+   * 사용자가 여행 계획에 접근 권한이 있는지 확인
+   */
+  public async canAccessPlan(
+    planId: string,
+    userId: string
+  ): Promise<{ canAccess: boolean; role?: UserRole }> {
+    const plan = await db.read<TravelPlan>('travel_plans', planId);
+
+    if (!plan) {
+      return { canAccess: false };
+    }
+
+    // 소유자인 경우
+    if (plan.ownerId === userId) {
+      return { canAccess: true, role: UserRole.OWNER };
+    }
+
+    // 멤버인 경우
+    const member = plan.members.find((m) => m.id === userId);
+    if (member) {
+      return { canAccess: true, role: member.role };
+    }
+
+    return { canAccess: false };
   }
 
   /**
@@ -194,3 +355,6 @@ declare global {
     Kakao: any;
   }
 }
+
+// Export singleton instance
+export const shareService = new ShareService();

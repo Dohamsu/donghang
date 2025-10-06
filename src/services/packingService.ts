@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export class PackingService {
   private db = LocalDatabase.getInstance();
-  private storeName = 'packingItems';
+  private storeName = 'packing_items';
 
   public async createPackingItem(
     planId: string,

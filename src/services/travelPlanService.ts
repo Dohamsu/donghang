@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export class TravelPlanService {
   private db = LocalDatabase.getInstance();
-  private storeName = 'travelPlans';
+  private storeName = 'travel_plans';
 
   public async createTravelPlan(
     request: CreateTravelPlanRequest,

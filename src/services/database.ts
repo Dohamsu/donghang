@@ -1,177 +1,167 @@
-// Type imports for database schema definition (prefixed with _ to indicate intentionally unused)
+import { supabase } from '../lib/supabase';
 import type {
-  TravelPlan as _TravelPlan,
-  Place as _Place,
-  Schedule as _Schedule,
-  BudgetItem as _BudgetItem,
-  PackingItem as _PackingItem,
-  ReviewItem as _ReviewItem,
-  TemporaryPlace as _TemporaryPlace,
-  User as _User,
+  TravelPlan,
+  Place,
+  Schedule,
+  BudgetItem,
+  PackingItem,
+  ReviewItem,
+  TemporaryPlace,
+  User,
 } from '../types';
 
-export class LocalDatabase {
-  private static instance: LocalDatabase;
-  private dbName = 'TravelPlannerDB';
-  private version = 1;
-  private db: IDBDatabase | null = null;
+// Helper function to convert camelCase to snake_case
+function toSnakeCase(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key in obj) {
+    const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    result[snakeKey] = obj[key];
+  }
+  return result;
+}
+
+// Helper function to convert snake_case to camelCase
+function toCamelCase(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key in obj) {
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    result[camelKey] = obj[key];
+  }
+  return result;
+}
+
+export class SupabaseDatabase {
+  private static instance: SupabaseDatabase;
 
   private constructor() {}
 
-  public static getInstance(): LocalDatabase {
-    if (!LocalDatabase.instance) {
-      LocalDatabase.instance = new LocalDatabase();
+  public static getInstance(): SupabaseDatabase {
+    if (!SupabaseDatabase.instance) {
+      SupabaseDatabase.instance = new SupabaseDatabase();
     }
-    return LocalDatabase.instance;
+    return SupabaseDatabase.instance;
   }
 
   public async init(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, this.version);
-
-      request.onerror = () => {
-        reject(new Error('Failed to open database'));
-      };
-
-      request.onsuccess = () => {
-        this.db = request.result;
-        resolve();
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-
-        if (!db.objectStoreNames.contains('travelPlans')) {
-          const travelPlansStore = db.createObjectStore('travelPlans', {
-            keyPath: 'id',
-          });
-          travelPlansStore.createIndex('ownerId', 'ownerId', { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('places')) {
-          db.createObjectStore('places', { keyPath: 'id' });
-        }
-
-        if (!db.objectStoreNames.contains('schedules')) {
-          const schedulesStore = db.createObjectStore('schedules', {
-            keyPath: 'id',
-          });
-          schedulesStore.createIndex('planId', 'planId', { unique: false });
-          schedulesStore.createIndex('date', 'date', { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('budgetItems')) {
-          const budgetStore = db.createObjectStore('budgetItems', {
-            keyPath: 'id',
-          });
-          budgetStore.createIndex('planId', 'planId', { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('packingItems')) {
-          const packingStore = db.createObjectStore('packingItems', {
-            keyPath: 'id',
-          });
-          packingStore.createIndex('planId', 'planId', { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('reviews')) {
-          const reviewsStore = db.createObjectStore('reviews', {
-            keyPath: 'id',
-          });
-          reviewsStore.createIndex('planId', 'planId', { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('temporaryPlaces')) {
-          const tempStore = db.createObjectStore('temporaryPlaces', {
-            keyPath: 'id',
-          });
-          tempStore.createIndex('planId', 'planId', { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('users')) {
-          db.createObjectStore('users', { keyPath: 'id' });
-        }
-      };
-    });
+    // Supabase client is already initialized in lib/supabase.ts
+    // This method is kept for compatibility with existing code
+    return Promise.resolve();
   }
 
-  private async getStore(
-    storeName: string,
-    mode: IDBTransactionMode = 'readonly'
-  ): Promise<IDBObjectStore> {
-    if (!this.db) {
-      await this.init();
-    }
-    const transaction = this.db!.transaction([storeName], mode);
-    return transaction.objectStore(storeName);
-  }
-
+  // Generic CRUD operations
   public async create<T extends { id: string }>(
-    storeName: string,
+    tableName: string,
     item: T
   ): Promise<T> {
-    const store = await this.getStore(storeName, 'readwrite');
-    return new Promise((resolve, reject) => {
-      const request = store.add(item);
-      request.onsuccess = () => resolve(item);
-      request.onerror = () => reject(new Error('Failed to create item'));
-    });
+    const snakeItem = toSnakeCase(item as unknown as Record<string, unknown>);
+
+    const { data, error } = await supabase
+      .from(tableName)
+      .insert(snakeItem)
+      .select()
+      .single();
+
+    if (error) {
+      console.error(`Failed to create item in ${tableName}:`, error);
+      throw new Error(`Failed to create item: ${error.message}`);
+    }
+
+    return toCamelCase(data) as unknown as T;
   }
 
-  public async read<T>(storeName: string, id: string): Promise<T | null> {
-    const store = await this.getStore(storeName);
-    return new Promise((resolve, reject) => {
-      const request = store.get(id);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(new Error('Failed to read item'));
-    });
+  public async read<T>(tableName: string, id: string): Promise<T | null> {
+    const { data, error } = await supabase
+      .from(tableName)
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No rows returned
+        return null;
+      }
+      console.error(`Failed to read item from ${tableName}:`, error);
+      throw new Error(`Failed to read item: ${error.message}`);
+    }
+
+    return data ? (toCamelCase(data) as unknown as T) : null;
   }
 
   public async update<T extends { id: string }>(
-    storeName: string,
+    tableName: string,
     item: T
   ): Promise<T> {
-    const store = await this.getStore(storeName, 'readwrite');
-    return new Promise((resolve, reject) => {
-      const request = store.put(item);
-      request.onsuccess = () => resolve(item);
-      request.onerror = () => reject(new Error('Failed to update item'));
-    });
+    const { id, ...updates } = item;
+    const snakeUpdates = toSnakeCase(updates as unknown as Record<string, unknown>);
+
+    const { data, error } = await supabase
+      .from(tableName)
+      .update(snakeUpdates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error(`Failed to update item in ${tableName}:`, error);
+      throw new Error(`Failed to update item: ${error.message}`);
+    }
+
+    return toCamelCase(data) as unknown as T;
   }
 
-  public async delete(storeName: string, id: string): Promise<void> {
-    const store = await this.getStore(storeName, 'readwrite');
-    return new Promise((resolve, reject) => {
-      const request = store.delete(id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(new Error('Failed to delete item'));
-    });
+  public async delete(tableName: string, id: string): Promise<void> {
+    const { error } = await supabase
+      .from(tableName)
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error(`Failed to delete item from ${tableName}:`, error);
+      throw new Error(`Failed to delete item: ${error.message}`);
+    }
   }
 
-  public async getAll<T>(storeName: string): Promise<T[]> {
-    const store = await this.getStore(storeName);
-    return new Promise((resolve, reject) => {
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(new Error('Failed to get all items'));
-    });
+  public async getAll<T>(tableName: string): Promise<T[]> {
+    const { data, error } = await supabase
+      .from(tableName)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error(`Failed to get all items from ${tableName}:`, error);
+      throw new Error(`Failed to get items: ${error.message}`);
+    }
+
+    return data.map((item) => toCamelCase(item) as unknown as T);
   }
 
   public async getByIndex<T>(
-    storeName: string,
+    tableName: string,
     indexName: string,
     value: string
   ): Promise<T[]> {
-    const store = await this.getStore(storeName);
-    const index = store.index(indexName);
-    return new Promise((resolve, reject) => {
-      const request = index.getAll(value);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(new Error('Failed to get items by index'));
-    });
+    const snakeIndexName = indexName.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+
+    const { data, error } = await supabase
+      .from(tableName)
+      .select('*')
+      .eq(snakeIndexName, value)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error(`Failed to get items by index from ${tableName}:`, error);
+      throw new Error(`Failed to get items by index: ${error.message}`);
+    }
+
+    return data.map((item) => toCamelCase(item) as unknown as T);
   }
 }
 
+// Maintain backward compatibility
+export const LocalDatabase = SupabaseDatabase;
+
+// LocalStorage service remains unchanged as it's for client-side temporary data
 export class LocalStorageService {
   private static prefix = 'travel_planner_';
 
@@ -213,3 +203,118 @@ export class LocalStorageService {
     }
   }
 }
+
+// Export typed database instance
+export const db = SupabaseDatabase.getInstance();
+
+// Helper functions for specific entities
+export const travelPlanService = {
+  async getByOwnerId(ownerId: string): Promise<TravelPlan[]> {
+    return db.getByIndex<TravelPlan>('travel_plans', 'ownerId', ownerId);
+  },
+
+  async getByMembership(userId: string): Promise<TravelPlan[]> {
+    const { data, error } = await supabase
+      .from('travel_plans')
+      .select('*')
+      .or(`owner_id.eq.${userId},members.cs.${JSON.stringify([{ id: userId }])}`)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Failed to get travel plans by membership:', error);
+      throw new Error(`Failed to get travel plans: ${error.message}`);
+    }
+
+    return data.map((item) => toCamelCase(item) as unknown as TravelPlan);
+  },
+};
+
+export const scheduleService = {
+  async getByPlanAndDate(planId: string, date: string): Promise<Schedule[]> {
+    const { data, error } = await supabase
+      .from('schedules')
+      .select('*')
+      .eq('plan_id', planId)
+      .eq('date', date)
+      .order('order', { ascending: true });
+
+    if (error) {
+      console.error('Failed to get schedules:', error);
+      throw new Error(`Failed to get schedules: ${error.message}`);
+    }
+
+    return data.map((item) => toCamelCase(item) as unknown as Schedule);
+  },
+};
+
+export const budgetService = {
+  async getByPlan(planId: string): Promise<BudgetItem[]> {
+    return db.getByIndex<BudgetItem>('budget_items', 'planId', planId);
+  },
+};
+
+export const packingService = {
+  async getByPlan(planId: string): Promise<PackingItem[]> {
+    return db.getByIndex<PackingItem>('packing_items', 'planId', planId);
+  },
+};
+
+export const reviewService = {
+  async getByPlan(planId: string): Promise<ReviewItem[]> {
+    return db.getByIndex<ReviewItem>('reviews', 'planId', planId);
+  },
+
+  async getByPlace(placeId: string): Promise<ReviewItem[]> {
+    return db.getByIndex<ReviewItem>('reviews', 'placeId', placeId);
+  },
+};
+
+export const temporaryPlaceService = {
+  async getByPlan(planId: string): Promise<TemporaryPlace[]> {
+    return db.getByIndex<TemporaryPlace>('temporary_places', 'planId', planId);
+  },
+};
+
+export const userService = {
+  async getCurrentUser(): Promise<User | null> {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return null;
+    }
+
+    // Try to get user from database
+    const dbUser = await db.read<User>('users', user.id);
+
+    if (dbUser) {
+      return dbUser;
+    }
+
+    // Create user if doesn't exist
+    const newUser: User = {
+      id: user.id,
+      name: user.email?.split('@')[0] || 'Anonymous User',
+      email: user.email,
+      avatar: user.user_metadata?.avatar_url,
+    };
+
+    return db.create('users', newUser);
+  },
+
+  async signInAnonymously(): Promise<User> {
+    const { data, error } = await supabase.auth.signInAnonymously();
+
+    if (error) {
+      throw new Error(`Failed to sign in: ${error.message}`);
+    }
+
+    const user: User = {
+      id: data.user!.id,
+      name: 'Anonymous User',
+      email: undefined,
+      avatar: undefined,
+    };
+
+    return db.create('users', user);
+  },
+};

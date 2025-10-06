@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export class BudgetService {
   private db = LocalDatabase.getInstance();
-  private storeName = 'budgetItems';
+  private storeName = 'budget_items';
 
   public async createBudgetItem(
     planId: string,
